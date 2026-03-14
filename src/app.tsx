@@ -25,10 +25,19 @@ type TimelineEntry =
 			screenshots: string[];
 	  };
 
+interface ThreadSummary {
+	id: string;
+	title: string;
+	updatedAt: number;
+}
+
 interface AppState {
+	activeThreadId: string | null;
+	threads: ThreadSummary[];
 	sessionId: string | null;
 	status: "idle" | "busy" | "connecting";
 	entries: TimelineEntry[];
+	sidebarOpen: boolean;
 }
 
 type Action =
@@ -44,7 +53,17 @@ type Action =
 			input?: string;
 			output?: string;
 			screenshots?: string[];
-	  };
+	  }
+	| { type: "SET_THREADS"; threads: ThreadSummary[] }
+	| {
+			type: "SET_ACTIVE_THREAD";
+			threadId: string;
+			entries: TimelineEntry[];
+	  }
+	| { type: "ADD_THREAD"; thread: ThreadSummary }
+	| { type: "REMOVE_THREAD"; threadId: string }
+	| { type: "UPDATE_THREAD_TITLE"; threadId: string; title: string }
+	| { type: "TOGGLE_SIDEBAR" };
 
 const SCREENSHOT_PATTERN = /\.bun-browse\/screenshots\/([^\s]+\.png)/g;
 
@@ -142,24 +161,81 @@ function reducer(state: AppState, action: Action): AppState {
 			};
 		}
 
+		case "SET_THREADS":
+			return { ...state, threads: action.threads };
+
+		case "SET_ACTIVE_THREAD":
+			return {
+				...state,
+				activeThreadId: action.threadId,
+				entries: action.entries,
+				sessionId: null,
+			};
+
+		case "ADD_THREAD":
+			return {
+				...state,
+				threads: [action.thread, ...state.threads],
+			};
+
+		case "REMOVE_THREAD": {
+			const threads = state.threads.filter((t) => t.id !== action.threadId);
+			if (state.activeThreadId === action.threadId) {
+				return {
+					...state,
+					threads,
+					activeThreadId: threads[0]?.id ?? null,
+					entries: [],
+					sessionId: null,
+				};
+			}
+			return { ...state, threads };
+		}
+
+		case "UPDATE_THREAD_TITLE":
+			return {
+				...state,
+				threads: state.threads.map((t) =>
+					t.id === action.threadId ? { ...t, title: action.title } : t,
+				),
+			};
+
+		case "TOGGLE_SIDEBAR":
+			return { ...state, sidebarOpen: !state.sidebarOpen };
+
 		default:
 			return state;
 	}
 }
 
 const initialState: AppState = {
+	activeThreadId: null,
+	threads: [],
 	sessionId: null,
 	status: "connecting",
 	entries: [],
+	sidebarOpen: false,
 };
 
 // ── WebSocket hook ──
 
-function useWebSocket(dispatch: React.Dispatch<Action>) {
+function useWebSocket(
+	dispatch: React.Dispatch<Action>,
+	activeThreadId: string | null,
+) {
 	const wsRef = useRef<WebSocket | null>(null);
 	const retryRef = useRef(0);
+	const threadIdRef = useRef(activeThreadId);
+	threadIdRef.current = activeThreadId;
 
 	useEffect(() => {
+		function subscribe(ws: WebSocket) {
+			const tid = threadIdRef.current;
+			if (ws.readyState === WebSocket.OPEN && tid) {
+				ws.send(JSON.stringify({ type: "subscribe", threadId: tid }));
+			}
+		}
+
 		function connect() {
 			const protocol = location.protocol === "https:" ? "wss:" : "ws:";
 			const ws = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -168,11 +244,11 @@ function useWebSocket(dispatch: React.Dispatch<Action>) {
 			ws.onopen = () => {
 				retryRef.current = 0;
 				dispatch({ type: "SET_STATUS", status: "idle" });
+				subscribe(ws);
 			};
 
 			ws.onmessage = (evt) => {
 				const event = JSON.parse(evt.data);
-				// Handle pre-warmed session from server
 				if (event.type === "warmed_session" && event.sessionId) {
 					dispatch({
 						type: "SET_SESSION",
@@ -196,6 +272,14 @@ function useWebSocket(dispatch: React.Dispatch<Action>) {
 			wsRef.current?.close();
 		};
 	}, [dispatch]);
+
+	// Subscribe when active thread changes
+	useEffect(() => {
+		const ws = wsRef.current;
+		if (ws?.readyState === WebSocket.OPEN && activeThreadId) {
+			ws.send(JSON.stringify({ type: "subscribe", threadId: activeThreadId }));
+		}
+	}, [activeThreadId]);
 }
 
 const userMessageIDs = new Set<string>();
@@ -222,7 +306,6 @@ function handleEvent(
 		case "message.part.updated": {
 			const part = properties.part as Record<string, unknown>;
 
-			// Skip parts belonging to user messages (already shown as chat bubbles)
 			if (userMessageIDs.has(part.messageID as string)) break;
 
 			if (part.type === "text") {
@@ -269,15 +352,135 @@ function handleEvent(
 	}
 }
 
+// ── Helpers ──
+
+function generateId(): string {
+	return crypto.randomUUID();
+}
+
+function relativeTime(ts: number): string {
+	const diff = Date.now() - ts;
+	const mins = Math.floor(diff / 60000);
+	if (mins < 1) return "just now";
+	if (mins < 60) return `${mins}m ago`;
+	const hours = Math.floor(mins / 60);
+	if (hours < 24) return `${hours}h ago`;
+	const days = Math.floor(hours / 24);
+	return `${days}d ago`;
+}
+
 // ── Components ──
 
-function Header({ status }: { status: AppState["status"] }) {
+function Header({
+	status,
+	onToggleSidebar,
+}: {
+	status: AppState["status"];
+	onToggleSidebar: () => void;
+}) {
 	return (
 		<header className="header">
+			<button
+				type="button"
+				className="sidebar-toggle"
+				onClick={onToggleSidebar}
+				aria-label="Toggle sidebar"
+			>
+				&#9776;
+			</button>
 			<div className={`status-dot ${status}`} />
 			<h1>browse</h1>
 			<span className="header-status">{status}</span>
 		</header>
+	);
+}
+
+function ThreadItem({
+	thread,
+	active,
+	onSelect,
+	onDelete,
+}: {
+	thread: ThreadSummary;
+	active: boolean;
+	onSelect: () => void;
+	onDelete: () => void;
+}) {
+	return (
+		<div className={`thread-item ${active ? "active" : ""}`}>
+			<button type="button" className="thread-item-btn" onClick={onSelect}>
+				<span className="thread-title">{thread.title}</span>
+				<span className="thread-time">{relativeTime(thread.updatedAt)}</span>
+			</button>
+			<button
+				type="button"
+				className="thread-delete"
+				onClick={(e) => {
+					e.stopPropagation();
+					onDelete();
+				}}
+				aria-label="Delete thread"
+			>
+				&times;
+			</button>
+		</div>
+	);
+}
+
+function Sidebar({
+	threads,
+	activeThreadId,
+	open,
+	onSelectThread,
+	onNewThread,
+	onDeleteThread,
+	onClose,
+}: {
+	threads: ThreadSummary[];
+	activeThreadId: string | null;
+	open: boolean;
+	onSelectThread: (id: string) => void;
+	onNewThread: () => void;
+	onDeleteThread: (id: string) => void;
+	onClose: () => void;
+}) {
+	return (
+		<>
+			{open && (
+				<button
+					type="button"
+					className="sidebar-backdrop"
+					onClick={onClose}
+					aria-label="Close sidebar"
+				/>
+			)}
+			<aside className={`sidebar ${open ? "open" : ""}`}>
+				<div className="sidebar-header">
+					<span className="sidebar-title">Threads</span>
+					<button
+						type="button"
+						className="new-thread-btn"
+						onClick={onNewThread}
+					>
+						+ New
+					</button>
+				</div>
+				<div className="thread-list">
+					{threads.map((t) => (
+						<ThreadItem
+							key={t.id}
+							thread={t}
+							active={t.id === activeThreadId}
+							onSelect={() => onSelectThread(t.id)}
+							onDelete={() => onDeleteThread(t.id)}
+						/>
+					))}
+					{threads.length === 0 && (
+						<div className="thread-list-empty">No threads yet</div>
+					)}
+				</div>
+			</aside>
+		</>
 	);
 }
 
@@ -441,11 +644,15 @@ function Timeline({
 function ChatInput({
 	status,
 	sessionId,
+	activeThreadId,
 	dispatch,
+	onEnsureThread,
 }: {
 	status: AppState["status"];
 	sessionId: string | null;
+	activeThreadId: string | null;
 	dispatch: React.Dispatch<Action>;
+	onEnsureThread: () => Promise<string>;
 }) {
 	const [text, setText] = useState("");
 	const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -460,6 +667,9 @@ function ChatInput({
 			dispatch({ type: "ADD_USER_MESSAGE", text: trimmed });
 			setText("");
 
+			// Ensure we have a thread
+			const threadId = activeThreadId ?? (await onEnsureThread());
+
 			let sid = sessionId;
 			if (!sid) {
 				const res = await fetch("/api/session", { method: "POST" });
@@ -471,10 +681,10 @@ function ChatInput({
 			await fetch(`/api/session/${sid}/message`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ text: trimmed }),
+				body: JSON.stringify({ text: trimmed, threadId }),
 			});
 		},
-		[text, busy, sessionId, dispatch],
+		[text, busy, sessionId, activeThreadId, dispatch, onEnsureThread],
 	);
 
 	const handleAbort = useCallback(async () => {
@@ -531,17 +741,137 @@ function ChatInput({
 function App() {
 	const [state, dispatch] = useReducer(reducer, initialState);
 
-	useWebSocket(dispatch);
+	useWebSocket(dispatch, state.activeThreadId);
+
+	// Load threads on mount
+	useEffect(() => {
+		(async () => {
+			const res = await fetch("/api/threads");
+			const threads = (await res.json()) as ThreadSummary[];
+			dispatch({ type: "SET_THREADS", threads });
+
+			// Load most recent thread if available
+			if (threads.length > 0 && threads[0]) {
+				const threadRes = await fetch(`/api/threads/${threads[0].id}`);
+				const data = (await threadRes.json()) as {
+					entries: TimelineEntry[];
+				};
+				dispatch({
+					type: "SET_ACTIVE_THREAD",
+					threadId: threads[0].id,
+					entries: data.entries,
+				});
+			}
+		})();
+	}, []);
+
+	const handleSelectThread = useCallback(async (threadId: string) => {
+		const res = await fetch(`/api/threads/${threadId}`);
+		const data = (await res.json()) as { entries: TimelineEntry[] };
+		dispatch({
+			type: "SET_ACTIVE_THREAD",
+			threadId,
+			entries: data.entries,
+		});
+		// Close sidebar on mobile
+		dispatch({ type: "TOGGLE_SIDEBAR" });
+	}, []);
+
+	const handleNewThread = useCallback(async () => {
+		const id = generateId();
+		const res = await fetch("/api/threads", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ id }),
+		});
+		const thread = (await res.json()) as { id: string; title: string };
+		const summary: ThreadSummary = {
+			id: thread.id,
+			title: thread.title,
+			updatedAt: Date.now(),
+		};
+		dispatch({ type: "ADD_THREAD", thread: summary });
+		dispatch({
+			type: "SET_ACTIVE_THREAD",
+			threadId: thread.id,
+			entries: [],
+		});
+	}, []);
+
+	const handleDeleteThread = useCallback(
+		async (threadId: string) => {
+			await fetch(`/api/threads/${threadId}`, { method: "DELETE" });
+			dispatch({ type: "REMOVE_THREAD", threadId });
+
+			// If we deleted the active thread and there are remaining threads, load first
+			if (state.activeThreadId === threadId && state.threads.length > 1) {
+				const remaining = state.threads.filter((t) => t.id !== threadId);
+				if (remaining[0]) {
+					const res = await fetch(`/api/threads/${remaining[0].id}`);
+					const data = (await res.json()) as {
+						entries: TimelineEntry[];
+					};
+					dispatch({
+						type: "SET_ACTIVE_THREAD",
+						threadId: remaining[0].id,
+						entries: data.entries,
+					});
+				}
+			}
+		},
+		[state.activeThreadId, state.threads],
+	);
+
+	// Ensure a thread exists (create one if needed) — used by ChatInput
+	const ensureThread = useCallback(async (): Promise<string> => {
+		const id = generateId();
+		const res = await fetch("/api/threads", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ id }),
+		});
+		const thread = (await res.json()) as { id: string; title: string };
+		const summary: ThreadSummary = {
+			id: thread.id,
+			title: thread.title,
+			updatedAt: Date.now(),
+		};
+		dispatch({ type: "ADD_THREAD", thread: summary });
+		dispatch({
+			type: "SET_ACTIVE_THREAD",
+			threadId: thread.id,
+			entries: [],
+		});
+		return thread.id;
+	}, []);
 
 	return (
 		<>
-			<Header status={state.status} />
-			<Timeline entries={state.entries} busy={state.status === "busy"} />
-			<ChatInput
+			<Header
 				status={state.status}
-				sessionId={state.sessionId}
-				dispatch={dispatch}
+				onToggleSidebar={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
 			/>
+			<div className="app-layout">
+				<Sidebar
+					threads={state.threads}
+					activeThreadId={state.activeThreadId}
+					open={state.sidebarOpen}
+					onSelectThread={handleSelectThread}
+					onNewThread={handleNewThread}
+					onDeleteThread={handleDeleteThread}
+					onClose={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
+				/>
+				<main className="main-content">
+					<Timeline entries={state.entries} busy={state.status === "busy"} />
+					<ChatInput
+						status={state.status}
+						sessionId={state.sessionId}
+						activeThreadId={state.activeThreadId}
+						dispatch={dispatch}
+						onEnsureThread={ensureThread}
+					/>
+				</main>
+			</div>
 		</>
 	);
 }
