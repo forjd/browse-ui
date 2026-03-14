@@ -678,11 +678,25 @@ function ChatInput({
 				dispatch({ type: "SET_SESSION", sessionId: sid });
 			}
 
-			await fetch(`/api/session/${sid}/message`, {
+			const msgRes = await fetch(`/api/session/${sid}/message`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ text: trimmed, threadId }),
 			});
+
+			// Server returns auto-title when thread is first messaged
+			if (msgRes.headers.get("content-type")?.includes("json")) {
+				const data = (await msgRes.json()) as {
+					threadTitle?: string;
+				};
+				if (data.threadTitle) {
+					dispatch({
+						type: "UPDATE_THREAD_TITLE",
+						threadId,
+						title: data.threadTitle,
+					});
+				}
+			}
 		},
 		[text, busy, sessionId, activeThreadId, dispatch, onEnsureThread],
 	);

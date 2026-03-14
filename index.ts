@@ -276,6 +276,9 @@ const server = Bun.serve<WsData>({
 				if (thread?.title === "New thread") {
 					const title = truncateAtWord(body.text, 60);
 					updateThread(body.threadId, { title });
+
+					await sendMessage(sessionId, body.text);
+					return Response.json({ threadTitle: title });
 				}
 			}
 

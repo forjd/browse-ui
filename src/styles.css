@@ -659,6 +659,7 @@ body::before {
 	border: 1px solid var(--border-subtle);
 	border-radius: var(--radius-md);
 	overflow: hidden;
+	flex-shrink: 0;
 	max-width: 85%;
 	animation: slideUp 0.25s ease;
 	transition: border-color 0.2s;
@@ -669,6 +670,7 @@ body::before {
 }
 
 .tool-card-header {
+	appearance: none;
 	display: flex;
 	align-items: center;
 	gap: 10px;
