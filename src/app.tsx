@@ -67,6 +67,7 @@ type Action =
 	| { type: "TOGGLE_SIDEBAR" };
 
 const SCREENSHOT_PATTERN = /\.bun-browse\/screenshots\/([^\s]+\.png)/g;
+const SCREENSHOT_MD_IMAGE = /!\[[^\]]*\]\([^)]*?screenshot-[^\s)]+\.png\)\n?/g;
 
 function extractScreenshots(text: string): string[] {
 	const matches: string[] = [];
@@ -529,9 +530,10 @@ function UserMessage({ text, timestamp }: { text: string; timestamp: number }) {
 }
 
 function TextEntry({ text, timestamp }: { text: string; timestamp: number }) {
+	const cleaned = text.replace(SCREENSHOT_MD_IMAGE, "").trim();
 	return (
 		<div className="text-entry prose">
-			<Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+			<Markdown remarkPlugins={[remarkGfm]}>{cleaned}</Markdown>
 			<span className="message-time">{formatTime(timestamp)}</span>
 		</div>
 	);
@@ -666,6 +668,7 @@ function Timeline({
 							/>
 						);
 					case "tool":
+						if (/screenshot-[^\s]+\.png$/.test(entry.tool)) return null;
 						return <ToolCard key={entry.id} entry={entry} />;
 					default:
 						return null;
