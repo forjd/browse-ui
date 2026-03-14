@@ -2,6 +2,8 @@
 
 A web interface for agentic browser automation. Chat-style input, visual timeline output.
 
+![preview](preview.png)
+
 ## What is this?
 
 A Bun-powered web app that lets you give natural language instructions to an AI agent that controls a real browser via [browse](https://github.com/forjd/browse). Think ChatGPT, but it actually goes and does things on the web.
