@@ -216,7 +216,10 @@ const server = Bun.serve<WsData>({
 					return new Response("Not found", { status: 404 });
 				}
 				const rows = getEntries(threadId);
-				const entries = rows.map((r) => JSON.parse(r.data));
+				const entries = rows.map((r) => ({
+					...JSON.parse(r.data),
+					timestamp: r.created_at,
+				}));
 				return Response.json({
 					id: thread.id,
 					title: thread.title,

@@ -13,8 +13,8 @@ import remarkGfm from "remark-gfm";
 // ── Types ──
 
 type TimelineEntry =
-	| { type: "user"; id: string; text: string }
-	| { type: "text"; id: string; text: string }
+	| { type: "user"; id: string; text: string; timestamp: number }
+	| { type: "text"; id: string; text: string; timestamp: number }
 	| {
 			type: "tool";
 			id: string;
@@ -23,6 +23,7 @@ type TimelineEntry =
 			input?: string;
 			output?: string;
 			screenshots: string[];
+			timestamp: number;
 	  };
 
 interface ThreadSummary {
@@ -92,6 +93,7 @@ function reducer(state: AppState, action: Action): AppState {
 						type: "user",
 						id: `user-${Date.now()}`,
 						text: action.text,
+						timestamp: Date.now(),
 					},
 				],
 			};
@@ -112,7 +114,12 @@ function reducer(state: AppState, action: Action): AppState {
 				...state,
 				entries: [
 					...state.entries,
-					{ type: "text", id: action.id, text: action.text },
+					{
+						type: "text",
+						id: action.id,
+						text: action.text,
+						timestamp: Date.now(),
+					},
 				],
 			};
 		}
@@ -157,6 +164,7 @@ function reducer(state: AppState, action: Action): AppState {
 						input: action.input,
 						output: action.output,
 						screenshots,
+						timestamp: Date.now(),
 					},
 				],
 			};
@@ -370,6 +378,14 @@ function relativeTime(ts: number): string {
 	return `${days}d ago`;
 }
 
+function formatTime(ts: number): string {
+	return new Date(ts).toLocaleTimeString([], {
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit",
+	});
+}
+
 // ── Components ──
 
 function Header({
@@ -503,14 +519,20 @@ function EmptyState() {
 	);
 }
 
-function UserMessage({ text }: { text: string }) {
-	return <div className="user-message">{text}</div>;
+function UserMessage({ text, timestamp }: { text: string; timestamp: number }) {
+	return (
+		<div className="user-message">
+			{text}
+			<span className="message-time">{formatTime(timestamp)}</span>
+		</div>
+	);
 }
 
-function TextEntry({ text }: { text: string }) {
+function TextEntry({ text, timestamp }: { text: string; timestamp: number }) {
 	return (
 		<div className="text-entry prose">
 			<Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+			<span className="message-time">{formatTime(timestamp)}</span>
 		</div>
 	);
 }
@@ -565,6 +587,7 @@ function ToolCard({
 				</span>
 				<span className="tool-name">{entry.tool}</span>
 				<span className={`tool-badge ${entry.status}`}>{entry.status}</span>
+				<span className="message-time">{formatTime(entry.timestamp)}</span>
 			</button>
 
 			{expanded && (
@@ -627,9 +650,21 @@ function Timeline({
 			{entries.map((entry) => {
 				switch (entry.type) {
 					case "user":
-						return <UserMessage key={entry.id} text={entry.text} />;
+						return (
+							<UserMessage
+								key={entry.id}
+								text={entry.text}
+								timestamp={entry.timestamp}
+							/>
+						);
 					case "text":
-						return <TextEntry key={entry.id} text={entry.text} />;
+						return (
+							<TextEntry
+								key={entry.id}
+								text={entry.text}
+								timestamp={entry.timestamp}
+							/>
+						);
 					case "tool":
 						return <ToolCard key={entry.id} entry={entry} />;
 					default:
