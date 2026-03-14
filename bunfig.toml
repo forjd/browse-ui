@@ -1,0 +1,4 @@
+[test]
+
+# Exclude opensrc directory from test discovery
+exclude = ["opensrc/**", "node_modules/**"]
