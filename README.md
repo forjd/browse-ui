@@ -23,7 +23,7 @@ A Bun-powered web app that lets you give natural language instructions to an AI 
 │  - Chat input                    │
 │  - Action timeline + screenshots │
 ├──────────────────────────────────┤
-│  OpenCode (agent + LLM)         │
+│  OpenCode (agent + LLM)          │
 │  - Interprets user intent        │
 │  - Decides which browse commands │
 │  - Loops until task is complete  │
