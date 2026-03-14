@@ -1,0 +1,11 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"permission": {
+		"bash": "allow",
+		"edit": "allow",
+		"webfetch": "allow",
+		"doom_loop": "allow",
+		"external_directory": "allow"
+	},
+	"instructions": ["/Users/dan/Projects/bun-browser/SKILL.md"]
+}

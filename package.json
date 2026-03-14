@@ -11,9 +11,16 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.7",
 		"@types/bun": "latest",
+		"@types/react": "^19.2.14",
+		"@types/react-dom": "^19.2.3",
 		"lefthook": "^2.1.4"
 	},
 	"peerDependencies": {
 		"typescript": "^5"
+	},
+	"dependencies": {
+		"@opencode-ai/sdk": "^1.2.26",
+		"react": "^19.2.4",
+		"react-dom": "^19.2.4"
 	}
 }
