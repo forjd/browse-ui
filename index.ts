@@ -16,6 +16,7 @@ import index from "./src/index.html";
 import {
 	abortSession,
 	createSession,
+	getClient,
 	getWarmedSessionId,
 	init,
 	onEvent,
@@ -293,6 +294,42 @@ const server = Bun.serve<WsData>({
 		if (abortMatch?.[1] && req.method === "POST") {
 			const result = await abortSession(abortMatch[1]);
 			return Response.json({ aborted: result });
+		}
+
+		// ── Daemon API ──
+
+		if (url.pathname === "/api/daemon/restart" && req.method === "POST") {
+			try {
+				// Shut down the daemon; ignore errors if it's already stopped
+				Bun.spawnSync(["browse", "quit"]);
+				// Trigger a fresh start by running a lightweight command
+				const result = Bun.spawnSync(["browse", "version"]);
+				const ok = result.exitCode === 0;
+				return Response.json({ restarted: ok });
+			} catch (err) {
+				return Response.json({ error: String(err) }, { status: 500 });
+			}
+		}
+
+		// ── Config & Provider API ──
+
+		if (url.pathname === "/api/config" && req.method === "GET") {
+			const { data, error } = await getClient().config.get();
+			if (error) return Response.json(error, { status: 500 });
+			return Response.json(data);
+		}
+
+		if (url.pathname === "/api/config" && req.method === "PATCH") {
+			const body = await req.json();
+			const { data, error } = await getClient().config.update({ body });
+			if (error) return Response.json(error, { status: 400 });
+			return Response.json(data);
+		}
+
+		if (url.pathname === "/api/providers" && req.method === "GET") {
+			const { data, error } = await getClient().provider.list();
+			if (error) return Response.json(error, { status: 500 });
+			return Response.json(data);
 		}
 
 		// Screenshot serving

@@ -23,6 +23,7 @@ export function onEvent(handler: EventHandler) {
 export async function init() {
 	const result = await createOpencode({
 		config: {
+			model: "opencode/minimax-m2.5-free",
 			instructions: [SKILL_PATH],
 			permission: {
 				bash: "allow",
@@ -108,6 +109,10 @@ export function getWarmedSessionId() {
 }
 
 export { SCREENSHOT_DIR };
+
+export function getClient() {
+	return client;
+}
 
 export function shutdown() {
 	serverHandle?.close();

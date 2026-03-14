@@ -66,6 +66,43 @@ type Action =
 	| { type: "UPDATE_THREAD_TITLE"; threadId: string; title: string }
 	| { type: "TOGGLE_SIDEBAR" };
 
+// ── Settings ──
+
+interface Settings {
+	fontSize: number;
+	showTimestamps: boolean;
+	autoExpandTools: boolean;
+	messageWidth: "compact" | "default" | "wide";
+}
+
+const DEFAULT_SETTINGS: Settings = {
+	fontSize: 14,
+	showTimestamps: true,
+	autoExpandTools: false,
+	messageWidth: "default",
+};
+
+function loadSettings(): Settings {
+	try {
+		const stored = localStorage.getItem("browse-ui-settings");
+		if (stored) return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+	} catch {
+		// ignore
+	}
+	return { ...DEFAULT_SETTINGS };
+}
+
+function saveSettings(settings: Settings) {
+	localStorage.setItem("browse-ui-settings", JSON.stringify(settings));
+}
+
+interface ProviderModel {
+	id: string;
+	name: string;
+	providerId: string;
+	providerName: string;
+}
+
 const SCREENSHOT_PATTERN = /\.bun-browse\/screenshots\/([^\s]+\.png)/g;
 const SCREENSHOT_MD_IMAGE = /!\[[^\]]*\]\([^)]*?screenshot-[^\s)]+\.png\)\n?/g;
 
@@ -392,10 +429,24 @@ function formatTime(ts: number): string {
 function Header({
 	status,
 	onToggleSidebar,
+	onOpenSettings,
 }: {
 	status: AppState["status"];
 	onToggleSidebar: () => void;
+	onOpenSettings: () => void;
 }) {
+	const [restarting, setRestarting] = useState(false);
+
+	async function handleRestart() {
+		if (restarting) return;
+		setRestarting(true);
+		try {
+			await fetch("/api/daemon/restart", { method: "POST" });
+		} finally {
+			setRestarting(false);
+		}
+	}
+
 	return (
 		<header className="header">
 			<button
@@ -408,7 +459,28 @@ function Header({
 			</button>
 			<div className={`status-dot ${status}`} />
 			<h1>browse</h1>
-			<span className="header-status">{status}</span>
+			<div className="header-actions">
+				<span className="header-status">{status}</span>
+				<button
+					type="button"
+					className={`header-action ${restarting ? "spinning" : ""}`}
+					onClick={handleRestart}
+					disabled={restarting}
+					aria-label="Restart browser daemon"
+					title="Restart browser daemon"
+				>
+					&#x21BB;
+				</button>
+				<button
+					type="button"
+					className="header-action"
+					onClick={onOpenSettings}
+					aria-label="Settings"
+					title="Settings"
+				>
+					&#x2699;
+				</button>
+			</div>
 		</header>
 	);
 }
@@ -570,12 +642,209 @@ function Screenshot({ src }: { src: string }) {
 	);
 }
 
+function SettingsModal({
+	settings,
+	onUpdate,
+	onClose,
+}: {
+	settings: Settings;
+	onUpdate: (patch: Partial<Settings>) => void;
+	onClose: () => void;
+}) {
+	const [currentModel, setCurrentModel] = useState("");
+	const [models, setModels] = useState<ProviderModel[]>([]);
+	const [loadingModel, setLoadingModel] = useState(true);
+
+	useEffect(() => {
+		(async () => {
+			try {
+				const [configRes, providersRes] = await Promise.all([
+					fetch("/api/config"),
+					fetch("/api/providers"),
+				]);
+				const config = await configRes.json();
+				const providers = await providersRes.json();
+
+				setCurrentModel(config.model ?? "");
+
+				const allModels: ProviderModel[] = [];
+				for (const provider of providers.all ?? []) {
+					for (const [modelId, model] of Object.entries(
+						provider.models ?? {},
+					)) {
+						const m = model as { name: string };
+						allModels.push({
+							id: `${provider.id}/${modelId}`,
+							name: m.name || modelId,
+							providerId: provider.id,
+							providerName: provider.name || provider.id,
+						});
+					}
+				}
+				setModels(allModels);
+			} catch {
+				// non-fatal
+			} finally {
+				setLoadingModel(false);
+			}
+		})();
+	}, []);
+
+	useEffect(() => {
+		function handleKey(e: KeyboardEvent) {
+			if (e.key === "Escape") onClose();
+		}
+		window.addEventListener("keydown", handleKey);
+		return () => window.removeEventListener("keydown", handleKey);
+	}, [onClose]);
+
+	async function handleModelChange(model: string) {
+		setCurrentModel(model);
+		await fetch("/api/config", {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model }),
+		});
+	}
+
+	const providerGroups = models.reduce(
+		(groups, m) => {
+			const key = m.providerName;
+			if (!groups[key]) groups[key] = [];
+			groups[key].push(m);
+			return groups;
+		},
+		{} as Record<string, ProviderModel[]>,
+	);
+
+	return (
+		<div
+			className="settings-overlay"
+			onClick={(e) => {
+				if (e.target === e.currentTarget) onClose();
+			}}
+			onKeyDown={() => {}}
+			role="dialog"
+			aria-modal="true"
+		>
+			<div className="settings-panel">
+				<div className="settings-header">
+					<h2>Settings</h2>
+					<button type="button" className="settings-close" onClick={onClose}>
+						&times;
+					</button>
+				</div>
+
+				<div className="settings-section">
+					<div className="settings-section-title">Appearance</div>
+
+					<div className="settings-row">
+						<span className="settings-label">Font size</span>
+						<div className="range-group">
+							<input
+								type="range"
+								className="settings-range"
+								min={12}
+								max={18}
+								value={settings.fontSize}
+								onChange={(e) => onUpdate({ fontSize: Number(e.target.value) })}
+							/>
+							<span className="range-value">{settings.fontSize}</span>
+						</div>
+					</div>
+
+					<div className="settings-row">
+						<span className="settings-label">Show timestamps</span>
+						<label className="toggle-switch">
+							<input
+								type="checkbox"
+								checked={settings.showTimestamps}
+								onChange={(e) => onUpdate({ showTimestamps: e.target.checked })}
+							/>
+							<span className="toggle-slider" />
+						</label>
+					</div>
+
+					<div className="settings-row">
+						<span className="settings-label">Message width</span>
+						<div className="segmented-control">
+							{(["compact", "default", "wide"] as const).map((w) => (
+								<button
+									key={w}
+									type="button"
+									className={`segmented-btn ${settings.messageWidth === w ? "active" : ""}`}
+									onClick={() => onUpdate({ messageWidth: w })}
+								>
+									{w}
+								</button>
+							))}
+						</div>
+					</div>
+				</div>
+
+				<div className="settings-section">
+					<div className="settings-section-title">Agent</div>
+
+					<div className="settings-row">
+						<span className="settings-label">
+							Model
+							{loadingModel && (
+								<span className="settings-label-hint">Loading...</span>
+							)}
+						</span>
+						<select
+							className="settings-select"
+							value={currentModel}
+							onChange={(e) => handleModelChange(e.target.value)}
+							disabled={loadingModel}
+						>
+							{currentModel && models.length === 0 && (
+								<option value={currentModel}>{currentModel}</option>
+							)}
+							{Object.entries(providerGroups).map(([provider, provModels]) => (
+								<optgroup key={provider} label={provider}>
+									{provModels.map((m) => (
+										<option key={m.id} value={m.id}>
+											{m.name}
+										</option>
+									))}
+								</optgroup>
+							))}
+						</select>
+					</div>
+
+					<div className="settings-row">
+						<span className="settings-label">
+							Auto-expand tool cards
+							<span className="settings-label-hint">
+								New tool cards start expanded
+							</span>
+						</span>
+						<label className="toggle-switch">
+							<input
+								type="checkbox"
+								checked={settings.autoExpandTools}
+								onChange={(e) =>
+									onUpdate({ autoExpandTools: e.target.checked })
+								}
+							/>
+							<span className="toggle-slider" />
+						</label>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function ToolCard({
 	entry,
+	autoExpand,
 }: {
 	entry: Extract<TimelineEntry, { type: "tool" }>;
+	autoExpand: boolean;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(autoExpand);
 
 	return (
 		<div className="tool-card">
@@ -627,9 +896,11 @@ function ThinkingIndicator() {
 function Timeline({
 	entries,
 	busy,
+	autoExpandTools,
 }: {
 	entries: TimelineEntry[];
 	busy: boolean;
+	autoExpandTools: boolean;
 }) {
 	const bottomRef = useRef<HTMLDivElement>(null);
 	const count = entries.length;
@@ -669,7 +940,13 @@ function Timeline({
 						);
 					case "tool":
 						if (/screenshot-[^\s]+\.png$/.test(entry.tool)) return null;
-						return <ToolCard key={entry.id} entry={entry} />;
+						return (
+							<ToolCard
+								key={entry.id}
+								entry={entry}
+								autoExpand={autoExpandTools}
+							/>
+						);
 					default:
 						return null;
 				}
@@ -793,8 +1070,27 @@ function ChatInput({
 
 function App() {
 	const [state, dispatch] = useReducer(reducer, initialState);
+	const [settings, setSettings] = useState<Settings>(loadSettings);
+	const [settingsOpen, setSettingsOpen] = useState(false);
 
 	useWebSocket(dispatch, state.activeThreadId);
+
+	// Apply settings to DOM
+	useEffect(() => {
+		document.documentElement.style.setProperty(
+			"--font-size",
+			`${settings.fontSize}px`,
+		);
+		document.documentElement.style.fontSize = `${settings.fontSize}px`;
+	}, [settings.fontSize]);
+
+	const handleUpdateSettings = useCallback((patch: Partial<Settings>) => {
+		setSettings((prev) => {
+			const next = { ...prev, ...patch };
+			saveSettings(next);
+			return next;
+		});
+	}, []);
 
 	// Load threads on mount
 	useEffect(() => {
@@ -898,11 +1194,16 @@ function App() {
 		return thread.id;
 	}, []);
 
+	const widthClass =
+		settings.messageWidth !== "default" ? `width-${settings.messageWidth}` : "";
+	const timestampClass = settings.showTimestamps ? "" : "hide-timestamps";
+
 	return (
 		<>
 			<Header
 				status={state.status}
 				onToggleSidebar={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
+				onOpenSettings={() => setSettingsOpen(true)}
 			/>
 			<div className="app-layout">
 				<Sidebar
@@ -914,8 +1215,12 @@ function App() {
 					onDeleteThread={handleDeleteThread}
 					onClose={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
 				/>
-				<main className="main-content">
-					<Timeline entries={state.entries} busy={state.status === "busy"} />
+				<main className={`main-content ${widthClass} ${timestampClass}`.trim()}>
+					<Timeline
+						entries={state.entries}
+						busy={state.status === "busy"}
+						autoExpandTools={settings.autoExpandTools}
+					/>
 					<ChatInput
 						status={state.status}
 						sessionId={state.sessionId}
@@ -925,6 +1230,13 @@ function App() {
 					/>
 				</main>
 			</div>
+			{settingsOpen && (
+				<SettingsModal
+					settings={settings}
+					onUpdate={handleUpdateSettings}
+					onClose={() => setSettingsOpen(false)}
+				/>
+			)}
 		</>
 	);
 }

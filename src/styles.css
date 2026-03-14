@@ -118,7 +118,6 @@ body::before {
 	color: var(--text-muted);
 	font-size: 12px;
 	font-weight: 500;
-	margin-left: auto;
 	text-transform: uppercase;
 	letter-spacing: 0.06em;
 }
@@ -136,6 +135,51 @@ body::before {
 
 .sidebar-toggle:hover {
 	color: var(--text);
+}
+
+/* Header action buttons (restart, settings) */
+.header-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	margin-left: auto;
+}
+
+.header-action {
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	font-size: 17px;
+	cursor: pointer;
+	padding: 6px;
+	line-height: 1;
+	border-radius: var(--radius-sm);
+	transition:
+		color 0.15s,
+		background 0.15s;
+}
+
+.header-action:hover:not(:disabled) {
+	color: var(--text);
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.header-action:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.header-action.spinning {
+	animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .status-dot {
@@ -944,6 +988,313 @@ body::before {
 
 .abort-btn:active {
 	transform: scale(0.97);
+}
+
+/* ─── Settings overlay & panel ─── */
+
+.settings-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	background: rgba(0, 0, 0, 0.6);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-lg);
+	animation: fadeIn 0.2s ease;
+}
+
+.settings-panel {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	padding: var(--space-lg);
+	width: 100%;
+	max-width: 440px;
+	max-height: 85vh;
+	overflow-y: auto;
+	animation: lightboxZoom 0.25s ease;
+	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.settings-panel::-webkit-scrollbar {
+	width: 4px;
+}
+
+.settings-panel::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.settings-panel::-webkit-scrollbar-thumb {
+	background: var(--border);
+	border-radius: var(--radius-full);
+}
+
+.settings-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: var(--space-lg);
+}
+
+.settings-header h2 {
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text);
+}
+
+.settings-close {
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	font-size: 20px;
+	cursor: pointer;
+	padding: 4px;
+	line-height: 1;
+	border-radius: var(--radius-sm);
+	transition:
+		color 0.15s,
+		background 0.15s;
+}
+
+.settings-close:hover {
+	color: var(--text);
+	background: var(--bg-tertiary);
+}
+
+.settings-section {
+	margin-bottom: var(--space-lg);
+}
+
+.settings-section:last-child {
+	margin-bottom: 0;
+}
+
+.settings-section-title {
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-muted);
+	margin-bottom: var(--space-md);
+}
+
+.settings-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 0;
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-row:last-child {
+	border-bottom: none;
+}
+
+.settings-label {
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+
+.settings-label-hint {
+	display: block;
+	font-size: 11px;
+	font-weight: 400;
+	color: var(--text-muted);
+	margin-top: 2px;
+}
+
+/* ─── Toggle switch ─── */
+
+.toggle-switch {
+	position: relative;
+	width: 40px;
+	height: 22px;
+	flex-shrink: 0;
+}
+
+.toggle-switch input {
+	opacity: 0;
+	width: 0;
+	height: 0;
+}
+
+.toggle-slider {
+	position: absolute;
+	inset: 0;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-full);
+	cursor: pointer;
+	transition:
+		background 0.2s,
+		border-color 0.2s;
+}
+
+.toggle-slider::before {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 16px;
+	height: 16px;
+	background: var(--text-muted);
+	border-radius: 50%;
+	transition:
+		transform 0.2s,
+		background 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+	background: var(--accent-dim);
+	border-color: var(--accent);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+	transform: translateX(18px);
+	background: var(--accent);
+}
+
+/* ─── Range slider ─── */
+
+.range-group {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.range-value {
+	font-size: 12px;
+	font-weight: 600;
+	font-family: var(--font-mono);
+	color: var(--accent);
+	min-width: 24px;
+	text-align: center;
+}
+
+input[type="range"].settings-range {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 100px;
+	height: 4px;
+	background: var(--bg-tertiary);
+	border-radius: var(--radius-full);
+	outline: none;
+	cursor: pointer;
+}
+
+input[type="range"].settings-range::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 16px;
+	height: 16px;
+	background: var(--accent);
+	border-radius: 50%;
+	border: none;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+input[type="range"].settings-range::-moz-range-thumb {
+	width: 16px;
+	height: 16px;
+	background: var(--accent);
+	border-radius: 50%;
+	border: none;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* ─── Segmented control ─── */
+
+.segmented-control {
+	display: flex;
+	background: var(--bg-tertiary);
+	border-radius: var(--radius-sm);
+	padding: 2px;
+	gap: 2px;
+}
+
+.segmented-btn {
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	font-size: 12px;
+	font-weight: 500;
+	font-family: var(--font-sans);
+	padding: 4px 12px;
+	border-radius: 4px;
+	cursor: pointer;
+	transition:
+		color 0.15s,
+		background 0.15s;
+}
+
+.segmented-btn:hover {
+	color: var(--text-secondary);
+}
+
+.segmented-btn.active {
+	background: var(--accent-dim);
+	color: var(--accent);
+	font-weight: 600;
+}
+
+/* ─── Settings select ─── */
+
+.settings-select {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+	font-size: 12px;
+	font-family: var(--font-sans);
+	padding: 6px 10px;
+	max-width: 220px;
+	cursor: pointer;
+	outline: none;
+	transition: border-color 0.2s;
+}
+
+.settings-select:focus {
+	border-color: var(--accent);
+}
+
+.settings-select optgroup {
+	color: var(--text-muted);
+	font-weight: 600;
+}
+
+.settings-select option {
+	color: var(--text);
+	background: var(--bg-secondary);
+}
+
+/* ─── Message width modifiers ─── */
+
+.width-compact .text-entry,
+.width-compact .tool-card {
+	max-width: 65%;
+}
+
+.width-compact .user-message {
+	max-width: 55%;
+}
+
+.width-wide .text-entry,
+.width-wide .tool-card {
+	max-width: 95%;
+}
+
+.width-wide .user-message {
+	max-width: 85%;
+}
+
+/* ─── Timestamp visibility ─── */
+
+.hide-timestamps .message-time {
+	display: none;
 }
 
 /* ─── Responsive ─── */
