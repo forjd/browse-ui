@@ -3,6 +3,7 @@ import type { OpencodeClient } from "@opencode-ai/sdk/client";
 
 let client: OpencodeClient;
 let serverHandle: { url: string; close(): void };
+let warmedSessionId: string | null = null;
 
 const SKILL_PATH = "/Users/dan/Projects/bun-browser/SKILL.md";
 const SCREENSHOT_DIR = `${process.env.HOME}/.bun-browse/screenshots` as const;
@@ -46,9 +47,28 @@ export async function init() {
 	})();
 
 	console.log(`[opencode] server running at ${serverHandle.url}`);
+
+	// Pre-warm a session so the first user prompt is instant
+	try {
+		const { data, error } = await client.session.create();
+		if (!error && data) {
+			warmedSessionId = data.id;
+			console.log(`[opencode] pre-warmed session ${warmedSessionId}`);
+		}
+	} catch {
+		// Non-fatal — session will be created on demand
+	}
 }
 
 export async function createSession() {
+	// Return pre-warmed session if available
+	if (warmedSessionId) {
+		const id = warmedSessionId;
+		warmedSessionId = null;
+		console.log(`[opencode] using pre-warmed session ${id}`);
+		return { id };
+	}
+
 	const { data, error } = await client.session.create();
 	if (error)
 		throw new Error(`Failed to create session: ${JSON.stringify(error)}`);
@@ -81,6 +101,10 @@ export function extractScreenshots(output: string): string[] {
 		if (match[1]) matches.push(match[1]);
 	}
 	return matches;
+}
+
+export function getWarmedSessionId() {
+	return warmedSessionId;
 }
 
 export { SCREENSHOT_DIR };

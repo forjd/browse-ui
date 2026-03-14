@@ -7,6 +7,8 @@ import {
 	useState,
 } from "react";
 import { createRoot } from "react-dom/client";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // ── Types ──
 
@@ -170,6 +172,14 @@ function useWebSocket(dispatch: React.Dispatch<Action>) {
 
 			ws.onmessage = (evt) => {
 				const event = JSON.parse(evt.data);
+				// Handle pre-warmed session from server
+				if (event.type === "warmed_session" && event.sessionId) {
+					dispatch({
+						type: "SET_SESSION",
+						sessionId: event.sessionId,
+					});
+					return;
+				}
 				handleEvent(event, dispatch);
 			};
 
@@ -294,7 +304,42 @@ function UserMessage({ text }: { text: string }) {
 }
 
 function TextEntry({ text }: { text: string }) {
-	return <div className="text-entry">{text}</div>;
+	return (
+		<div className="text-entry prose">
+			<Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+		</div>
+	);
+}
+
+function Screenshot({ src }: { src: string }) {
+	const [lightbox, setLightbox] = useState(false);
+
+	return (
+		<>
+			<button
+				type="button"
+				className="screenshot"
+				onClick={() => setLightbox(true)}
+			>
+				<img src={src} alt="Browser screenshot" loading="lazy" />
+			</button>
+
+			{lightbox && (
+				<button
+					type="button"
+					className="lightbox-overlay"
+					onClick={() => setLightbox(false)}
+					onKeyDown={(e) => e.key === "Escape" && setLightbox(false)}
+				>
+					<img
+						src={src}
+						alt="Browser screenshot (full size)"
+						className="lightbox-image"
+					/>
+				</button>
+			)}
+		</>
+	);
 }
 
 function ToolCard({
@@ -334,13 +379,7 @@ function ToolCard({
 			)}
 
 			{entry.screenshots.map((filename) => (
-				<div className="screenshot" key={filename}>
-					<img
-						src={`/screenshots/${filename}`}
-						alt="Browser screenshot"
-						loading="lazy"
-					/>
-				</div>
+				<Screenshot key={filename} src={`/screenshots/${filename}`} />
 			))}
 		</div>
 	);

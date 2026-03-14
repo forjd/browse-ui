@@ -5,6 +5,7 @@ import index from "./src/index.html";
 import {
 	abortSession,
 	createSession,
+	getWarmedSessionId,
 	init,
 	onEvent,
 	SCREENSHOT_DIR,
@@ -87,6 +88,16 @@ const server = Bun.serve({
 	websocket: {
 		open(ws) {
 			clients.add(ws);
+			// Send pre-warmed session ID if available
+			const warmedId = getWarmedSessionId();
+			if (warmedId) {
+				ws.send(
+					JSON.stringify({
+						type: "warmed_session",
+						sessionId: warmedId,
+					}),
+				);
+			}
 		},
 		close(ws) {
 			clients.delete(ws);
