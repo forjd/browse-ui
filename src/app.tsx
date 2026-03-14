@@ -265,13 +265,27 @@ function Header({ status }: { status: AppState["status"] }) {
 	return (
 		<header className="header">
 			<div className={`status-dot ${status}`} />
-			<h1>browse-ui</h1>
-			<span
-				style={{ color: "var(--text-muted)", fontSize: 12, marginLeft: "auto" }}
-			>
-				{status}
-			</span>
+			<h1>browse</h1>
+			<span className="header-status">{status}</span>
 		</header>
+	);
+}
+
+function EmptyState() {
+	return (
+		<div className="empty-state">
+			<div className="empty-state-icon">
+				<span role="img" aria-label="compass">
+					&#x27A4;
+				</span>
+			</div>
+			<div className="empty-state-text">
+				Tell the agent what to do in the browser
+			</div>
+			<div className="empty-state-hint">
+				e.g. &ldquo;Check the pricing page on stripe.com&rdquo;
+			</div>
+		</div>
 	);
 }
 
@@ -297,8 +311,8 @@ function ToolCard({
 				className="tool-card-header"
 				onClick={() => setExpanded(!expanded)}
 			>
-				<span style={{ color: "var(--text-muted)", fontSize: 12 }}>
-					{expanded ? "▼" : "▶"}
+				<span className={`tool-collapse-icon ${expanded ? "expanded" : ""}`}>
+					&#x25B6;
 				</span>
 				<span className="tool-name">{entry.tool}</span>
 				<span className={`tool-badge ${entry.status}`}>{entry.status}</span>
@@ -366,6 +380,7 @@ function Timeline({
 
 	return (
 		<div className="timeline">
+			{entries.length === 0 && !busy && <EmptyState />}
 			{entries.map((entry) => {
 				switch (entry.type) {
 					case "user":
