@@ -132,6 +132,7 @@ function reducer(state: AppState, action: Action): AppState {
 				>;
 				entries[idx] = {
 					...existing,
+					tool: action.tool || existing.tool,
 					status: action.status as
 						| "pending"
 						| "running"
