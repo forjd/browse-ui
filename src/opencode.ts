@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { createOpencode } from "@opencode-ai/sdk";
 import type { OpencodeClient } from "@opencode-ai/sdk/client";
 
@@ -5,13 +6,34 @@ let client: OpencodeClient;
 let serverHandle: { url: string; close(): void };
 let warmedSessionId: string | null = null;
 
-const SKILL_PATH = "/Users/dan/Projects/bun-browser/SKILL.md";
+const DEFAULT_SKILL_PATH = fileURLToPath(
+	new URL("../SKILL.md", import.meta.url),
+);
+const SKILL_PATH = process.env.BROWSE_UI_SKILL_PATH || DEFAULT_SKILL_PATH;
 const SCREENSHOT_DIR = `${process.env.HOME}/.bun-browse/screenshots` as const;
 
 const SCREENSHOT_PATTERN = /\.bun-browse\/screenshots\/([^\s]+\.png)/g;
+const SCREENSHOT_INTENT_PATTERNS = [
+	/\bshow me\b/i,
+	/\blet me see\b/i,
+	/\bwhat does .+ look like\b/i,
+	/\btake a look\b/i,
+	/\bvisual check\b/i,
+];
+const SCREENSHOT_PROMPT_NOTE =
+	"\n\nSystem note: The user is asking for a visual result. You must take at least one `browse screenshot` after the relevant page loads so the UI can render it. A text-only snapshot is not enough unless the page fails to load.";
 
 type EventHandler = (event: unknown) => void;
 const eventHandlers = new Set<EventHandler>();
+
+function parseModelSelection(model: string) {
+	const separator = model.indexOf("/");
+	if (separator <= 0 || separator === model.length - 1) return undefined;
+	return {
+		providerID: model.slice(0, separator),
+		modelID: model.slice(separator + 1),
+	};
+}
 
 export function onEvent(handler: EventHandler) {
 	eventHandlers.add(handler);
@@ -23,7 +45,6 @@ export function onEvent(handler: EventHandler) {
 export async function init() {
 	const result = await createOpencode({
 		config: {
-			model: "opencode/minimax-m2.5-free",
 			instructions: [SKILL_PATH],
 			permission: {
 				bash: "allow",
@@ -76,15 +97,39 @@ export async function createSession() {
 	return data;
 }
 
-export async function sendMessage(sessionId: string, text: string) {
+export async function sendMessage(
+	sessionId: string,
+	text: string,
+	model?: string,
+	variant?: string,
+) {
+	const body: {
+		parts: Array<{ type: "text"; text: string }>;
+		model?: { providerID: string; modelID: string };
+		variant?: string;
+	} = {
+		parts: [{ type: "text", text: preparePromptText(text) }],
+	};
+
+	const selection = model ? parseModelSelection(model) : undefined;
+	if (selection) body.model = selection;
+	if (variant) body.variant = variant;
+
 	const { error } = await client.session.promptAsync({
 		path: { id: sessionId },
-		body: {
-			parts: [{ type: "text", text }],
-		},
+		body,
 	});
 	if (error)
 		throw new Error(`Failed to send message: ${JSON.stringify(error)}`);
+}
+
+export function requiresScreenshot(text: string) {
+	return SCREENSHOT_INTENT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function preparePromptText(text: string) {
+	if (!requiresScreenshot(text)) return text;
+	return `${text}${SCREENSHOT_PROMPT_NOTE}`;
 }
 
 export async function abortSession(sessionId: string) {

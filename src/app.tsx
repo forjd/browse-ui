@@ -73,6 +73,8 @@ interface Settings {
 	showTimestamps: boolean;
 	autoExpandTools: boolean;
 	messageWidth: "compact" | "default" | "wide";
+	selectedModel: string;
+	selectedVariant: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -80,6 +82,8 @@ const DEFAULT_SETTINGS: Settings = {
 	showTimestamps: true,
 	autoExpandTools: false,
 	messageWidth: "default",
+	selectedModel: "",
+	selectedVariant: "",
 };
 
 function loadSettings(): Settings {
@@ -101,10 +105,14 @@ interface ProviderModel {
 	name: string;
 	providerId: string;
 	providerName: string;
+	variants: string[];
 }
 
 const SCREENSHOT_PATTERN = /\.bun-browse\/screenshots\/([^\s]+\.png)/g;
 const SCREENSHOT_MD_IMAGE = /!\[[^\]]*\]\([^)]*?screenshot-[^\s)]+\.png\)\n?/g;
+const LOCAL_IMAGE_OUTPUT = "Image read successfully";
+const LOCAL_IMAGE_PATH_PATTERN =
+	/(?:^\/|^[A-Za-z]:[\\/]|(?:^|[\\/])\.\.?(?:[\\/]|$)).+\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i;
 
 function extractScreenshots(text: string): string[] {
 	const matches: string[] = [];
@@ -112,6 +120,40 @@ function extractScreenshots(text: string): string[] {
 		if (match[1]) matches.push(match[1]);
 	}
 	return matches;
+}
+
+function isLocalImageToolResult(
+	entry: Extract<TimelineEntry, { type: "tool" }>,
+) {
+	return (
+		entry.status === "completed" &&
+		entry.output?.trim() === LOCAL_IMAGE_OUTPUT &&
+		LOCAL_IMAGE_PATH_PATTERN.test(entry.tool.trim())
+	);
+}
+
+function getInlineImageSources(
+	entry: Extract<TimelineEntry, { type: "tool" }>,
+) {
+	const sources = entry.screenshots.map((filename) => ({
+		key: `screenshot:${filename}`,
+		src: `/screenshots/${encodeURIComponent(filename)}`,
+	}));
+
+	if (isLocalImageToolResult(entry)) {
+		sources.push({
+			key: `local:${entry.tool}`,
+			src: `/local-image?path=${encodeURIComponent(entry.tool)}`,
+		});
+	}
+
+	return sources;
+}
+
+function formatVariantLabel(variant: string): string {
+	const normalized = variant.replaceAll(/[_-]+/g, " ");
+	if (normalized === "xhigh") return "X-High";
+	return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -651,33 +693,36 @@ function SettingsModal({
 	onUpdate: (patch: Partial<Settings>) => void;
 	onClose: () => void;
 }) {
-	const [currentModel, setCurrentModel] = useState("");
 	const [models, setModels] = useState<ProviderModel[]>([]);
 	const [loadingModel, setLoadingModel] = useState(true);
 
 	useEffect(() => {
 		(async () => {
 			try {
-				const [configRes, providersRes] = await Promise.all([
-					fetch("/api/config"),
-					fetch("/api/providers"),
-				]);
-				const config = await configRes.json();
+				const providersRes = await fetch("/api/providers");
 				const providers = await providersRes.json();
-
-				setCurrentModel(config.model ?? "");
+				const connectedProviders = new Set<string>(providers.connected ?? []);
 
 				const allModels: ProviderModel[] = [];
 				for (const provider of providers.all ?? []) {
+					if (!connectedProviders.has(provider.id)) continue;
+
 					for (const [modelId, model] of Object.entries(
 						provider.models ?? {},
 					)) {
-						const m = model as { name: string };
+						const m = model as {
+							id?: string;
+							name?: string;
+							variants?: Record<string, { disabled?: boolean }>;
+						};
 						allModels.push({
-							id: `${provider.id}/${modelId}`,
+							id: m.id || `${provider.id}/${modelId}`,
 							name: m.name || modelId,
 							providerId: provider.id,
 							providerName: provider.name || provider.id,
+							variants: Object.entries(m.variants ?? {})
+								.filter(([, variant]) => !variant?.disabled)
+								.map(([variantId]) => variantId),
 						});
 					}
 				}
@@ -698,13 +743,16 @@ function SettingsModal({
 		return () => window.removeEventListener("keydown", handleKey);
 	}, [onClose]);
 
-	async function handleModelChange(model: string) {
-		setCurrentModel(model);
-		await fetch("/api/config", {
-			method: "PATCH",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ model }),
-		});
+	function handleModelChange(model: string) {
+		const nextModel = models.find((item) => item.id === model);
+		const nextVariant = nextModel?.variants.includes(settings.selectedVariant)
+			? settings.selectedVariant
+			: "";
+		onUpdate({ selectedModel: model, selectedVariant: nextVariant });
+	}
+
+	function handleVariantChange(variant: string) {
+		onUpdate({ selectedVariant: variant });
 	}
 
 	const providerGroups = models.reduce(
@@ -716,6 +764,29 @@ function SettingsModal({
 		},
 		{} as Record<string, ProviderModel[]>,
 	);
+	const currentModel = settings.selectedModel;
+	const currentModelConfig = models.find((m) => m.id === currentModel);
+	const hasCurrentModel = Boolean(currentModelConfig);
+	const availableVariants = currentModelConfig?.variants ?? [];
+	const variantSupported = availableVariants.length > 0;
+	const selectedVariantAvailable =
+		!settings.selectedVariant ||
+		availableVariants.includes(settings.selectedVariant);
+
+	useEffect(() => {
+		if (
+			!loadingModel &&
+			settings.selectedVariant &&
+			!selectedVariantAvailable
+		) {
+			onUpdate({ selectedVariant: "" });
+		}
+	}, [
+		loadingModel,
+		onUpdate,
+		selectedVariantAvailable,
+		settings.selectedVariant,
+	]);
 
 	return (
 		<div
@@ -798,7 +869,8 @@ function SettingsModal({
 							onChange={(e) => handleModelChange(e.target.value)}
 							disabled={loadingModel}
 						>
-							{currentModel && models.length === 0 && (
+							<option value="">Use OpenCode default</option>
+							{currentModel && !hasCurrentModel && (
 								<option value={currentModel}>{currentModel}</option>
 							)}
 							{Object.entries(providerGroups).map(([provider, provModels]) => (
@@ -809,6 +881,39 @@ function SettingsModal({
 										</option>
 									))}
 								</optgroup>
+							))}
+						</select>
+					</div>
+
+					<div className="settings-row">
+						<span className="settings-label">
+							Thinking effort
+							<span className="settings-label-hint">
+								Uses the selected model&apos;s supported effort variants
+							</span>
+						</span>
+						<select
+							className="settings-select"
+							value={selectedVariantAvailable ? settings.selectedVariant : ""}
+							onChange={(e) => handleVariantChange(e.target.value)}
+							disabled={loadingModel || !variantSupported}
+						>
+							<option value="">
+								{variantSupported
+									? "Use model default"
+									: currentModel
+										? "No effort options for this model"
+										: "Choose a model first"}
+							</option>
+							{!selectedVariantAvailable && settings.selectedVariant && (
+								<option value={settings.selectedVariant}>
+									{formatVariantLabel(settings.selectedVariant)}
+								</option>
+							)}
+							{availableVariants.map((variant) => (
+								<option key={variant} value={variant}>
+									{formatVariantLabel(variant)}
+								</option>
 							))}
 						</select>
 					</div>
@@ -845,6 +950,7 @@ function ToolCard({
 	autoExpand: boolean;
 }) {
 	const [expanded, setExpanded] = useState(autoExpand);
+	const inlineImages = getInlineImageSources(entry);
 
 	return (
 		<div className="tool-card">
@@ -876,8 +982,8 @@ function ToolCard({
 				</div>
 			)}
 
-			{entry.screenshots.map((filename) => (
-				<Screenshot key={filename} src={`/screenshots/${filename}`} />
+			{inlineImages.map((image) => (
+				<Screenshot key={image.key} src={image.src} />
 			))}
 		</div>
 	);
@@ -961,12 +1067,16 @@ function ChatInput({
 	status,
 	sessionId,
 	activeThreadId,
+	selectedModel,
+	selectedVariant,
 	dispatch,
 	onEnsureThread,
 }: {
 	status: AppState["status"];
 	sessionId: string | null;
 	activeThreadId: string | null;
+	selectedModel: string;
+	selectedVariant: string;
 	dispatch: React.Dispatch<Action>;
 	onEnsureThread: () => Promise<string>;
 }) {
@@ -997,7 +1107,12 @@ function ChatInput({
 			const msgRes = await fetch(`/api/session/${sid}/message`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ text: trimmed, threadId }),
+				body: JSON.stringify({
+					text: trimmed,
+					threadId,
+					model: selectedModel || undefined,
+					variant: selectedVariant || undefined,
+				}),
 			});
 
 			// Server returns auto-title when thread is first messaged
@@ -1014,7 +1129,16 @@ function ChatInput({
 				}
 			}
 		},
-		[text, busy, sessionId, activeThreadId, dispatch, onEnsureThread],
+		[
+			text,
+			busy,
+			sessionId,
+			activeThreadId,
+			selectedModel,
+			selectedVariant,
+			dispatch,
+			onEnsureThread,
+		],
 	);
 
 	const handleAbort = useCallback(async () => {
@@ -1225,6 +1349,8 @@ function App() {
 						status={state.status}
 						sessionId={state.sessionId}
 						activeThreadId={state.activeThreadId}
+						selectedModel={settings.selectedModel}
+						selectedVariant={settings.selectedVariant}
 						dispatch={dispatch}
 						onEnsureThread={ensureThread}
 					/>

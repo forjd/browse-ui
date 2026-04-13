@@ -1,67 +1,124 @@
 # browse-ui
 
-A web interface for agentic browser automation. Chat-style input, visual timeline output.
+A local web UI for browser automation driven by an OpenCode agent and the `browse` CLI.
+
+You type a prompt, the agent runs real browser actions, and the app renders the work as a live timeline of user messages, agent text, tool calls, and screenshots.
 
 ![preview](preview.png)
 
-## What is this?
+## Current status
 
-A Bun-powered web app that lets you give natural language instructions to an AI agent that controls a real browser via [browse](https://github.com/forjd/browse). Think ChatGPT, but it actually goes and does things on the web.
+This repository is a working prototype, not a polished product.
 
-**Examples:**
+What currently works:
 
-- "Research the latest pricing for Vercel, Netlify, and Cloudflare Pages and compare them"
-- "Go to staging.example.com, log in, and test the checkout flow"
-- "Run through the signup form and check for accessibility issues"
-- "QA the landing page on mobile and desktop viewports"
+- Bun server with a React frontend
+- live event streaming over WebSocket
+- persistent thread history in SQLite
+- screenshot extraction and serving
+- stop in-progress runs
+- restart the `browse` daemon from the UI
+- appearance settings and model selection via OpenCode config
 
-## How it works
+What is still rough:
 
+- setup is local-machine oriented
+- error handling is minimal
+- there is no auth or multi-user support
+- persisted threads survive restarts, but agent session state is recreated as needed
+
+## What the app does
+
+1. You enter a natural-language browser task in the chat box.
+2. The backend forwards that prompt to an OpenCode session.
+3. OpenCode uses its configured instructions to call `browse` commands through tool use.
+4. OpenCode streams events back to the Bun server.
+5. The UI updates in real time with text output, tool cards, statuses, and screenshots.
+
+Typical prompts:
+
+- "Compare pricing for Vercel, Netlify, and Cloudflare Pages."
+- "Open staging.example.com, log in, and test checkout."
+- "Run through the signup flow and note accessibility issues."
+- "Check the landing page on desktop and mobile."
+
+## Architecture
+
+The app is intentionally small:
+
+- [index.ts](/Users/dan/Projects/browse-ui/index.ts:1): Bun server, REST API, WebSocket relay, screenshot serving, thread/session wiring
+- [src/app.tsx](/Users/dan/Projects/browse-ui/src/app.tsx:1): React SPA, thread list, timeline, settings, chat input
+- [src/opencode.ts](/Users/dan/Projects/browse-ui/src/opencode.ts:1): OpenCode SDK bootstrap, event subscription, session helpers
+- [src/db.ts](/Users/dan/Projects/browse-ui/src/db.ts:1): SQLite persistence for threads and timeline entries
+
+Runtime flow:
+
+```text
+UI -> Bun server -> OpenCode SDK -> opencode serve -> browse CLI/daemon -> browser
+ ^         |
+ |         -> WebSocket updates + screenshot serving
+ -> REST APIs for threads, sessions, config, and providers
 ```
-┌──────────────────────────────────┐
-│  Web UI                          │
-│  - Chat input                    │
-│  - Action timeline + screenshots │
-├──────────────────────────────────┤
-│  OpenCode (agent + LLM)          │
-│  - Interprets user intent        │
-│  - Decides which browse commands │
-│  - Loops until task is complete  │
-├──────────────────────────────────┤
-│  browse CLI → daemon → Playwright│
-│  - Navigates, clicks, fills      │
-│  - Takes screenshots             │
-│  - Reads page content            │
-└──────────────────────────────────┘
-```
 
-1. You type a prompt in the web UI
-2. The prompt is sent to an OpenCode session via the SDK
-3. OpenCode's agent calls `browse` commands through its bash tool, guided by the browse skill
-4. Each action (navigation, click, screenshot, etc.) streams back to the UI as it happens
-5. The UI renders a visual timeline: screenshots, summaries, and status updates
+## Features in the current build
 
-## Tech stack
+- Thread list with persisted history stored at `~/.browse-ui/browse.db`
+- Auto-titles for new threads based on the first user message
+- Live timeline with:
+  - user messages
+  - streaming markdown text
+  - tool cards with status, input, output, and extracted screenshots
+- Screenshot lightbox
+- Session pre-warming so the first prompt starts faster
+- Settings modal with:
+  - font size
+  - timestamp visibility
+  - message width
+  - auto-expand tool cards
+  - model selection from available OpenCode providers
 
-- **Runtime:** Bun
-- **Backend:** `Bun.serve()` with WebSocket for live updates
-- **Frontend:** React, served via Bun HTML imports
-- **Agent:** OpenCode SDK — manages sessions, tool calling, and event streaming
-- **Browser automation:** browse (Playwright wrapper with persistent daemon)
+## Requirements
 
-## Prerequisites
+- [Bun](https://bun.sh)
+- [`browse`](https://github.com/forjd/browse) installed and available on `PATH`
+- [`opencode`](https://opencode.ai) installed and available on `PATH`
+- at least one working OpenCode model/provider configuration
+- the repo-local [SKILL.md](/Users/dan/Projects/browse-ui/SKILL.md:1) file
 
-- [Bun](https://bun.sh) >= 1.0
-- [browse](https://github.com/forjd/browse) installed and on PATH
-- [OpenCode](https://opencode.ai) installed and configured with an LLM provider
+Optional override:
 
-## Development
+- set `BROWSE_UI_SKILL_PATH` if you want to point the app at a different instruction file for local testing
+
+## Local development
 
 ```bash
 bun install
 bun run dev
 ```
 
-## Status
+Then open `http://localhost:3000`.
 
-Early development. Not yet functional.
+On startup the app:
+
+- initializes the SQLite database in `~/.browse-ui`
+- starts an OpenCode server through the SDK
+- subscribes to OpenCode events
+- pre-warms one session
+- serves screenshots from `~/.bun-browse/screenshots`
+
+## Testing
+
+Focused tests:
+
+```bash
+bun test index.test.ts src/db.test.ts
+```
+
+This currently passes.
+
+Plain `bun test` is misleading at the moment because Bun also discovers vendored tests under `opensrc/`, and some of those external fixtures are not runnable in this repo's test environment.
+
+## Repo notes
+
+- `opensrc/` is reference source code for dependencies, per `AGENTS.md`; it is not part of the runtime app
+- [docs/mvp.md](/Users/dan/Projects/browse-ui/docs/mvp.md:1) is useful background, but it describes the original MVP plan rather than the exact current state

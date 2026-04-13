@@ -7,5 +7,5 @@
 		"doom_loop": "allow",
 		"external_directory": "allow"
 	},
-	"instructions": ["/Users/dan/Projects/bun-browser/SKILL.md"]
+	"instructions": ["SKILL.md"]
 }
