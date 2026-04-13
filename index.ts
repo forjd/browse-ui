@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { extname, join, resolve } from "node:path";
 import type { ServerWebSocket } from "bun";
 import {
 	createThread,
@@ -59,6 +59,16 @@ function broadcastToThread(threadId: string, data: unknown) {
 // ── Server-side event → entry persistence ──
 
 const userMessageIDs = new Set<string>();
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+	".avif": "image/avif",
+	".bmp": "image/bmp",
+	".gif": "image/gif",
+	".jpeg": "image/jpeg",
+	".jpg": "image/jpeg",
+	".png": "image/png",
+	".svg": "image/svg+xml",
+	".webp": "image/webp",
+};
 
 function extractScreenshots(text: string): string[] {
 	const pattern = /\.bun-browse\/screenshots\/([^\s]+\.png)/g;
@@ -67,6 +77,21 @@ function extractScreenshots(text: string): string[] {
 		if (match[1]) matches.push(match[1]);
 	}
 	return matches;
+}
+
+function getImageContentType(filePath: string): string | null {
+	return IMAGE_CONTENT_TYPES[extname(filePath).toLowerCase()] ?? null;
+}
+
+function resolveLocalImagePath(rawPath: string): string | null {
+	const trimmed = rawPath.trim();
+	if (!trimmed) return null;
+
+	const resolvedPath = trimmed.startsWith("/")
+		? resolve(trimmed)
+		: resolve(process.cwd(), trimmed);
+
+	return getImageContentType(resolvedPath) ? resolvedPath : null;
 }
 
 function handleEventForPersistence(event: unknown) {
@@ -256,6 +281,8 @@ const server = Bun.serve<WsData>({
 			const body = (await req.json()) as {
 				text: string;
 				threadId?: string;
+				model?: string;
+				variant?: string;
 			};
 
 			// Link session to thread and persist user message
@@ -281,12 +308,12 @@ const server = Bun.serve<WsData>({
 					const title = truncateAtWord(body.text, 60);
 					updateThread(body.threadId, { title });
 
-					await sendMessage(sessionId, body.text);
+					await sendMessage(sessionId, body.text, body.model, body.variant);
 					return Response.json({ threadTitle: title });
 				}
 			}
 
-			await sendMessage(sessionId, body.text);
+			await sendMessage(sessionId, body.text, body.model, body.variant);
 			return new Response(null, { status: 204 });
 		}
 
@@ -333,6 +360,30 @@ const server = Bun.serve<WsData>({
 		}
 
 		// Screenshot serving
+		if (url.pathname === "/local-image") {
+			const requestedPath = url.searchParams.get("path");
+			if (!requestedPath) {
+				return new Response("Missing path", { status: 400 });
+			}
+
+			const filePath = resolveLocalImagePath(requestedPath);
+			if (!filePath) {
+				return new Response("Unsupported image path", { status: 400 });
+			}
+
+			try {
+				const data = await readFile(filePath);
+				return new Response(data, {
+					headers: {
+						"Cache-Control": "no-store",
+						"Content-Type": getImageContentType(filePath) ?? "image/png",
+					},
+				});
+			} catch {
+				return new Response("Not found", { status: 404 });
+			}
+		}
+
 		if (url.pathname.startsWith("/screenshots/")) {
 			const filename = url.pathname.slice("/screenshots/".length);
 			const filePath = join(SCREENSHOT_DIR, filename);
